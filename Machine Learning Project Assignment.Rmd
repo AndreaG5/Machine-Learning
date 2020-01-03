@@ -1,0 +1,139 @@
+---
+title: "Machine learning project assignment"
+author: "Gaudio Andrea"
+date: "02 gennaio 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Approach
+Since what it will be estimated is a nonparametric data, I decided to take into account two nonparametric estimation model: "Random Forest"  and "Boosted decision tree". Both of them use bootstrapping during their work, so I decided not to use a previous cross validation of any genre. The only thing that have been done is splitting the data into a training and a test set. I applied both predictive models to training data and then used them to estimate the "classe" variable into the test set constructed. At the end the best performing model between those two above mentioned have been applied to test data, downloaded from the link in the project description.
+
+
+## Preparing data
+
+
+```{r,  eval=F, echo=T, warning=F, message=F}
+library(caret)
+library(randomForest)
+library(gbm)
+library(ggplot2)
+library(ggpubr)
+set.seed(123)
+
+training = read.csv(file = "pml-training.csv", stringsAsFactors = F)
+test = read.csv(file = "pml-testing.csv", stringsAsFactors = F)
+str(training)
+table(training$classe)
+
+classe = as.factor(training$classe)
+numeric_vars = data.frame(lapply(training[,8:159], function(x) as.numeric(as.character(x))))
+data_full= data.frame(classe, numeric_vars)
+dim(data_full)
+```
+
+The dataset is composed by 19622 observation and 153 variables. Some variables have been excluded since they were not needed for the analysis (i.e. ID, partecipant names ecc.)
+
+## Partition data into training and test set
+
+```{r, eval=F, echo=T, warning=F, message=F}
+in_train = createDataPartition(data_full$classe, p=0.7, list=F)
+data_train = data_full[in_train,]
+data_test = data_full[-in_train, ]
+table(data_train$classe)
+NA95 = sapply(data_train, function(x) mean(is.na(x))) >0.95
+data_train = data_train[, NA95==F]
+data_test = data_test[, NA95==F]
+nearZeroVar(data_train)
+```
+
+70% of observation have been randomly assigned to training set and 30% to test set. Each set have been evaluated for the presence of many missing values which have been removed as well as nonzero variance variables.
+
+## Visualization - exploratory plots
+
+I explored some variables (which have been evaluated later on to be the most influential ones) distribution via violin plots and scatterplots, without great clear cut pattern of distribution.
+
+```{r, eval = F}
+ggarrange(
+     ggplot(data_train) + geom_violin(aes(classe, roll_belt, fill=classe)),
+     ggplot(data_train) + geom_violin(aes(classe, yaw_belt, fill=classe)),
+     ggplot(data_train) + geom_violin(aes(classe, magnet_dumbbell_z, fill=classe)),
+     ggplot(data_train) + geom_violin(aes(classe, pitch_forearm, fill=classe)),
+     ncol = 2, nrow = 2, common.legend = T)
+
+#scatterplots
+ggarrange(
+     ggplot(data_train) + geom_point(aes(x= yaw_belt, y= roll_belt, color = classe) , alpha = 0.25) + theme_light(),
+     ggplot(data_train) + geom_point(aes(x= yaw_belt, y= magnet_dumbbell_z, color = classe) , alpha = 0.25) + theme_light(),
+     ggplot(data_train) + geom_point(aes(x= roll_belt, y= magnet_dumbbell_z, color = classe) , alpha = 0.25) + theme_light(),
+     ggplot(data_train) + geom_point(aes(x= pitch_forearm, y= pitch_belt, color = classe) , alpha = 0.25) + theme_light(),
+     ncol = 2, nrow = 2, common.legend = T)
+
+```
+
+## Random Forest
+
+I built 4 random forest models, each one with 500 trees and differing for the variables to be considered at each split. Since I'm not so confident with caret package I used RandomForest package, even if with further research I found the same way to perform it with caret.
+
+
+```{r, eval=F, echo=T, warning=F, message=F}
+forest3 = randomForest(classe ~., data = data_train, ntree = 500, mtry = 3, importance = T)
+forest5 = randomForest(classe ~., data = data_train, ntree = 500, mtry = 5, importance = T)
+forest7 = randomForest(classe ~., data = data_train, ntree = 500, mtry = 7, importance = T)
+forest9 = randomForest(classe ~., data = data_train, ntree = 500, mtry = 9, importance = T)
+forest3
+forest5
+forest7
+forest9
+```
+
+The estimate of the error rate for the four models is between 0.5% and 0.7%. I decided to predict with all of the 4 models in order to understand which one was the best estimating model to be applied later on.
+
+```{r, eval=F, echo=T, warning=F, message=F}
+classe_rf3 = predict(forest3, newdata = data_test)
+classe_rf5 = predict(forest5, newdata = data_test)
+classe_rf7 = predict(forest7, newdata = data_test)
+classe_rf9 = predict(forest9, newdata = data_test)
+
+table(classe_rf3, data_test$classe)
+table(classe_rf5, data_test$classe)
+table(classe_rf7, data_test$classe)
+table(classe_rf9, data_test$classe)
+
+table(classe_rf3 == data_test$classe)
+table(classe_rf5 == data_test$classe)
+table(classe_rf7 == data_test$classe)
+table(classe_rf9 == data_test$classe)
+```
+
+I checked estimate error rate and random forest models built with 5,7,9 variables were the best performing one, with error rates of 0.54%, 0.55%, 0.53%, respectively. I decidet to evaluate the best performing models in predicting classe variable in the test set, and forest7 seemed to be the best compromise between low error rates and best predictive performance. At this point I checked the most influential variables, wich were used to explore plots.
+
+```{r, eval=F, echo=T, warning=F, message=F}
+importance = rowMeans(forest7$importance)
+importance = sort(importance, decreasing = T)
+head(importance, 10)
+```
+
+## Boosted decision trees
+
+Due to computational issues I evaluated boosted predictive model, considering 7 variables at each split of desicion tree, guided by random forest results. Results are not shown due to the same problems.
+
+```{r, eval=F, echo=T, warning=F, message=F}
+boost7 = gbm(classe ~., data = data_train, n.trees = 500, distribution = "multinomial", interaction.depth = 7)
+boost7
+classe_boost7 = predict(boost7, newdata = data_test, n.trees = 500, type = "response")
+classe_boost7 = apply(classe_boost7, 1, which.max)
+table(classe_boost7, data_test$classe)
+```
+
+The results were worst than those otained with random forest which I decided to apply to testset.
+
+```{r,  eval=F}
+data_quiz = data.frame(lapply(test[,8:159], function(x) as.numeric(as.character(x))))
+data_quiz = data_quiz[, NA95[-1] == F]
+classe_rf7_quiz = predict(forest7, newdata = data_quiz)
+classe_rf7_quiz
+```
+
+Random forest models with 500 trees and 7 variables predicts all cases correctly.
